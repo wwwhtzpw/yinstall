@@ -59,29 +59,23 @@ func GetPrimaryEnvFile(ctx *runner.StepContext, executor runner.Executor) (strin
 		return yasbootEnvFile, nil
 	}
 
-	// 3. 如果不存在，使用 ~/.bashrc 或 ~/.<port>
+	// 3. 如果不存在，使用 ~/.bashrc（默认端口 1688）或 ~/.port<port>（非默认端口）
 	beginPort := ctx.GetParamInt("db_begin_port", 1688)
-	// 检查是否有多个 yasdb 进程（多实例场景）
-	result, _ = executor.Execute("pgrep -c -x yasdb 2>/dev/null || echo 0", false)
-	yasdbCount := 0
-	if result != nil && result.GetStdout() != "" {
-		fmt.Sscanf(strings.TrimSpace(result.GetStdout()), "%d", &yasdbCount)
-	}
 
-	// 优先检查 ~/.<port> 文件是否存在（即使只有一个 yasdb 进程，也可能使用端口号文件）
-	portEnvFile := fmt.Sprintf("%s/.%d", homeDir, beginPort)
+	// 优先检查 ~/.port<port> 文件是否存在（非默认端口场景）
+	portEnvFile := fmt.Sprintf("%s/.port%d", homeDir, beginPort)
 	result, _ = executor.Execute(fmt.Sprintf("test -f %s", portEnvFile), false)
 	if result != nil && result.GetExitCode() == 0 {
 		return portEnvFile, nil
 	}
 
-	// 如果端口号文件不存在，根据 yasdb 进程数选择
+	// 如果端口号文件不存在，根据端口号选择
 	var envFile string
-	if yasdbCount > 1 {
-		// 多实例场景：使用 ~/.<port>
-		envFile = fmt.Sprintf("%s/.%d", homeDir, beginPort)
+	if beginPort != 1688 {
+		// 非默认端口：使用 ~/.port<port>（文件可能尚未创建）
+		envFile = fmt.Sprintf("%s/.port%d", homeDir, beginPort)
 	} else {
-		// 单实例场景：使用 ~/.bashrc
+		// 默认端口：使用 ~/.bashrc
 		envFile = fmt.Sprintf("%s/.bashrc", homeDir)
 	}
 

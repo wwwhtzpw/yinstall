@@ -24,7 +24,7 @@ type EnvConfig struct {
 type EnvResult struct {
 	HomeDir       string // 用户主目录
 	TargetEnvFile string // 目标环境变量文件
-	YasdbCount    int    // 运行中的 yasdb 进程数
+	YasdbCount    int    // 运行中的 yasdb 进程数（保留兼容，不再用于判断文件路径）
 	BashrcPath    string // 生成的 bashrc 路径
 }
 
@@ -51,12 +51,13 @@ func GetYasdbProcessCount(executor runner.Executor) int {
 	return yasdbCount
 }
 
-// DetermineEnvFile 根据 yasdb 进程数确定环境变量文件路径
-func DetermineEnvFile(homeDir string, yasdbCount int, beginPort int) string {
-	if yasdbCount <= 1 {
+// DetermineEnvFile 根据端口号确定环境变量文件路径
+// 规则：默认端口 1688 写入 ~/.bashrc；其他端口写入 ~/.port<端口号>
+func DetermineEnvFile(homeDir string, beginPort int) string {
+	if beginPort == 1688 {
 		return filepath.Join(homeDir, ".bashrc")
 	}
-	return filepath.Join(homeDir, fmt.Sprintf(".%d", beginPort))
+	return filepath.Join(homeDir, fmt.Sprintf(".port%d", beginPort))
 }
 
 // GetBashrcPath 获取 yasboot 生成的 bashrc 文件路径
@@ -107,6 +108,12 @@ func BashrcRemoveLine(executor runner.Executor, file, grepPattern string) bool {
 }
 
 // ConfigureEnvVars 配置环境变量（幂等：已存在的条目会被更新而非重复追加）
+//
+// 规则：
+//   - 端口 1688（默认）：将 source <clusterName>.bashrc 写入 ~/.bashrc
+//   - 其他端口：将所有内容写入 ~/.port<port>，不修改 ~/.bashrc
+//
+// YAC 模式下每个节点均需调用本函数。
 func ConfigureEnvVars(executor runner.Executor, cfg *EnvConfig) (*EnvResult, error) {
 	homeDir, err := GetUserHomeDir(executor, cfg.User)
 	if err != nil {
@@ -114,7 +121,7 @@ func ConfigureEnvVars(executor runner.Executor, cfg *EnvConfig) (*EnvResult, err
 	}
 
 	yasdbCount := GetYasdbProcessCount(executor)
-	targetEnvFile := DetermineEnvFile(homeDir, yasdbCount, cfg.BeginPort)
+	targetEnvFile := DetermineEnvFile(homeDir, cfg.BeginPort)
 	bashrcPath := GetBashrcPath(homeDir, cfg.ClusterName)
 
 	result := &EnvResult{
@@ -130,8 +137,8 @@ func ConfigureEnvVars(executor runner.Executor, cfg *EnvConfig) (*EnvResult, err
 		return result, fmt.Errorf("generated bashrc not found at %s", bashrcPath)
 	}
 
-	// 多实例场景下创建目标文件
-	if yasdbCount > 1 {
+	// 非默认端口场景下创建目标文件（~/.port<port>）
+	if cfg.BeginPort != 1688 {
 		checkResult, _ = executor.Execute(fmt.Sprintf("test -f %s", targetEnvFile), false)
 		if checkResult == nil || checkResult.GetExitCode() != 0 {
 			cmd := fmt.Sprintf("touch %s && chown %s:%s %s", targetEnvFile, cfg.User, cfg.User, targetEnvFile)
@@ -141,74 +148,111 @@ func ConfigureEnvVars(executor runner.Executor, cfg *EnvConfig) (*EnvResult, err
 		}
 	}
 
-	// 1. yasboot completion（只添加，不替换）
-	completionPath := fmt.Sprintf("%s/.yasboot/yasboot.completion.bash", homeDir)
-	completionLine := fmt.Sprintf("[ -f %s ] && source %s", completionPath, completionPath)
-	bashrcReplaceLine(executor, targetEnvFile,
-		"yasboot\\.completion\\.bash", completionLine)
+	if cfg.BeginPort == 1688 {
+		// === 默认端口 1688：修改 ~/.bashrc ===
 
-	// 2. source {clusterName}_yasdb_home/conf/{clusterName}.bashrc
-	// 匹配任意集群名的 source 行，存在旧集群名则替换
-	sourceLine := fmt.Sprintf("source %s", bashrcPath)
-	act := bashrcReplaceLine(executor, targetEnvFile,
-		"source.*\\.yasboot/.*_yasdb_home/conf/.*\\.bashrc", sourceLine)
-	_ = act
+		// 1. yasboot completion（只添加，不替换）
+		completionPath := fmt.Sprintf("%s/.yasboot/yasboot.completion.bash", homeDir)
+		completionLine := fmt.Sprintf("[ -f %s ] && source %s", completionPath, completionPath)
+		bashrcReplaceLine(executor, targetEnvFile,
+			"yasboot\\.completion\\.bash", completionLine)
 
-	// 3. YAC 模式：YASCS_HOME
-	if cfg.IsYACMode {
-		instanceResult, _ := executor.Execute(fmt.Sprintf("ls %s/ycs/ 2>/dev/null | head -1", cfg.DataPath), false)
-		if instanceResult != nil && instanceResult.GetStdout() != "" {
-			instanceName := strings.TrimSpace(instanceResult.GetStdout())
-			yascsHome := fmt.Sprintf("%s/ycs/%s", cfg.DataPath, instanceName)
-			exportLine := fmt.Sprintf("export YASCS_HOME=%s", yascsHome)
-			bashrcReplaceLine(executor, targetEnvFile,
-				"export YASCS_HOME=", exportLine)
+		// 2. source {clusterName}_yasdb_home/conf/{clusterName}.bashrc
+		// 匹配任意集群名的 source 行，存在旧集群名则替换
+		sourceLine := fmt.Sprintf("source %s", bashrcPath)
+		bashrcReplaceLine(executor, targetEnvFile,
+			"source.*\\.yasboot/.*_yasdb_home/conf/.*\\.bashrc", sourceLine)
+
+		// 3. YAC 模式：YASCS_HOME（写入 .bashrc）
+		if cfg.IsYACMode {
+			instanceResult, _ := executor.Execute(fmt.Sprintf("ls %s/ycs/ 2>/dev/null | head -1", cfg.DataPath), false)
+			if instanceResult != nil && instanceResult.GetStdout() != "" {
+				instanceName := strings.TrimSpace(instanceResult.GetStdout())
+				yascsHome := fmt.Sprintf("%s/ycs/%s", cfg.DataPath, instanceName)
+				exportLine := fmt.Sprintf("export YASCS_HOME=%s", yascsHome)
+				bashrcReplaceLine(executor, targetEnvFile,
+					"export YASCS_HOME=", exportLine)
+			}
 		}
+	} else {
+		// === 非默认端口：写入 ~/.port<port>，不动 ~/.bashrc ===
+
+		// 1. source {clusterName}.bashrc
+		sourceLine := fmt.Sprintf("source %s", bashrcPath)
+		bashrcReplaceLine(executor, targetEnvFile,
+			"source.*\\.yasboot/.*_yasdb_home/conf/.*\\.bashrc", sourceLine)
+
+		// 2. YAC 模式：YASCS_HOME
+		if cfg.IsYACMode {
+			instanceResult, _ := executor.Execute(fmt.Sprintf("ls %s/ycs/ 2>/dev/null | head -1", cfg.DataPath), false)
+			if instanceResult != nil && instanceResult.GetStdout() != "" {
+				instanceName := strings.TrimSpace(instanceResult.GetStdout())
+				yascsHome := fmt.Sprintf("%s/ycs/%s", cfg.DataPath, instanceName)
+				exportLine := fmt.Sprintf("export YASCS_HOME=%s", yascsHome)
+				bashrcReplaceLine(executor, targetEnvFile,
+					"export YASCS_HOME=", exportLine)
+			}
+		}
+		// 注意：非默认端口不向 ~/.bashrc 写入任何内容
 	}
 
 	return result, nil
 }
 
-// CleanEnvVars 从 .bashrc 中清理指定集群的环境变量条目
-// 精确匹配集群名和数据路径，避免误删其他集群的配置
-func CleanEnvVars(executor runner.Executor, user, clusterName, dataPath string) error {
+// CleanEnvVars 清理指定集群的环境变量条目
+// - 端口 1688：从 ~/.bashrc 中删除对应条目
+// - 其他端口：删除整个 ~/.port<port> 文件
+// YAC 模式下需在每个节点分别调用
+func CleanEnvVars(executor runner.Executor, user, clusterName, dataPath string, beginPort int) error {
 	homeDir, err := GetUserHomeDir(executor, user)
 	if err != nil {
 		return err
 	}
 
-	bashrc := filepath.Join(homeDir, ".bashrc")
-
-	// 检查文件是否存在
-	r, _ := executor.Execute(fmt.Sprintf("test -f %s", bashrc), false)
-	if r == nil || r.GetExitCode() != 0 {
-		return nil
+	if beginPort == 0 {
+		beginPort = 1688
 	}
 
-	// 1. 删除 source {clusterName}_yasdb_home/conf/{clusterName}.bashrc
-	//    精确匹配集群名，避免误删
-	clusterSourcePattern := fmt.Sprintf("source.*\\.yasboot/%s_yasdb_home/conf/%s\\.bashrc", clusterName, clusterName)
-	BashrcRemoveLine(executor, bashrc, clusterSourcePattern)
+	if beginPort == 1688 {
+		// 默认端口：从 ~/.bashrc 中精确删除该集群的条目
+		bashrc := filepath.Join(homeDir, ".bashrc")
 
-	// 2. 删除 export YASCS_HOME={dataPath}/ycs/
-	if dataPath != "" {
-		yascsPattern := fmt.Sprintf("export YASCS_HOME=%s/ycs/", dataPath)
-		BashrcRemoveLine(executor, bashrc, yascsPattern)
-	}
+		r, _ := executor.Execute(fmt.Sprintf("test -f %s", bashrc), false)
+		if r == nil || r.GetExitCode() != 0 {
+			return nil
+		}
 
-	// 3. 检查是否还有其他集群的 source 行；如果没有，也删除 yasboot completion
-	otherClusterCmd := fmt.Sprintf("grep -cE 'source.*\\.yasboot/.*_yasdb_home/conf/.*\\.bashrc' %s 2>/dev/null || echo 0", bashrc)
-	countResult, _ := executor.Execute(otherClusterCmd, false)
-	remaining := 0
-	if countResult != nil {
-		fmt.Sscanf(strings.TrimSpace(countResult.GetStdout()), "%d", &remaining)
-	}
-	if remaining == 0 {
-		BashrcRemoveLine(executor, bashrc, "yasboot\\.completion\\.bash")
-	}
+		// 1. 删除 source {clusterName}_yasdb_home/conf/{clusterName}.bashrc
+		clusterSourcePattern := fmt.Sprintf("source.*\\.yasboot/%s_yasdb_home/conf/%s\\.bashrc", clusterName, clusterName)
+		BashrcRemoveLine(executor, bashrc, clusterSourcePattern)
 
-	// 4. 清理可能遗留的空行（连续多个空行合并为一个）
-	executor.Execute(fmt.Sprintf("sed -i '/^$/N;/^\\n$/d' %s", bashrc), false)
+		// 2. 删除 export YASCS_HOME={dataPath}/ycs/
+		if dataPath != "" {
+			yascsPattern := fmt.Sprintf("export YASCS_HOME=%s/ycs/", dataPath)
+			BashrcRemoveLine(executor, bashrc, yascsPattern)
+		}
+
+		// 3. 如果 .bashrc 中没有其他集群的 source 行，也删除 yasboot completion
+		otherClusterCmd := fmt.Sprintf("grep -cE 'source.*\\.yasboot/.*_yasdb_home/conf/.*\\.bashrc' %s 2>/dev/null || echo 0", bashrc)
+		countResult, _ := executor.Execute(otherClusterCmd, false)
+		remaining := 0
+		if countResult != nil {
+			fmt.Sscanf(strings.TrimSpace(countResult.GetStdout()), "%d", &remaining)
+		}
+		if remaining == 0 {
+			BashrcRemoveLine(executor, bashrc, "yasboot\\.completion\\.bash")
+		}
+
+		// 4. 清理可能遗留的空行
+		executor.Execute(fmt.Sprintf("sed -i '/^$/N;/^\\n$/d' %s", bashrc), false)
+	} else {
+		// 非默认端口：直接删除整个 ~/.port<port> 文件
+		portFile := filepath.Join(homeDir, fmt.Sprintf(".port%d", beginPort))
+		r, _ := executor.Execute(fmt.Sprintf("test -f %s", portFile), false)
+		if r != nil && r.GetExitCode() == 0 {
+			executor.Execute(fmt.Sprintf("rm -f %s", portFile), true)
+		}
+	}
 
 	return nil
 }
@@ -221,4 +265,4 @@ func VerifyYasboot(executor runner.Executor, user string) (string, bool) {
 		return strings.TrimSpace(result.GetStdout()), true
 	}
 	return "", false
-}
+} 

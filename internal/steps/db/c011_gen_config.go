@@ -110,11 +110,12 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 --data-path %s \
 --log-path %s \
 --begin-port %d \
+--memory-limit %d \
 --node 1`,
 		stageDir, yasbootPath, clusterName,
 		user, escapeForSuC(password), ip, ctx.GetParamInt("ssh_port", 22),
 		installPath, dataPath, logPath,
-		beginPort)
+		beginPort, memoryPercent)
 
 	// Execute as yashan user
 	cmd := fmt.Sprintf("su - %s -c '%s'", user, genCmd)

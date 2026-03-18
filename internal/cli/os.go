@@ -176,12 +176,18 @@ type HostInfo struct {
 func runOS(cmd *cobra.Command, args []string) error {
 	flags := GetGlobalFlags()
 
-	if len(flags.Targets) == 0 && !flags.Local {
-		return fmt.Errorf("please specify --targets or use --local for local execution")
+	// If --targets is not specified, default to local execution.
+	if len(flags.Targets) == 0 {
+		flags.Local = true
+		flags.Targets = []string{"localhost"}
+	} else {
+		flags.Local = false
 	}
 
-	if flags.Local {
-		flags.Targets = []string{"localhost"}
+	// In local mode, do not inject default os-user-password unless explicitly set by user.
+	// This avoids unnecessary "login credential" parameters in local execution.
+	if flags.Local && !cmd.Flags().Changed("os-user-password") {
+		osUserPassword = ""
 	}
 
 	rid := flags.RunID

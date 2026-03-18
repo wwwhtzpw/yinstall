@@ -24,9 +24,13 @@ func StepG007Deploy() *runner.Step {
 			deployFile := ctx.GetParamString("ycm_deploy_file", "/opt/ycm/etc/deploy.yml")
 			driver := ctx.GetParamString("ycm_db_driver", "sqlite3")
 
-			// 检查 ycm-init 可执行文件（可能在 /opt/ycm-init 或 /opt/yashan-migrate-platform/ycm-init）
+			// 检查 ycm-init 可执行文件，支持多种可能的路径
+			// - /opt/ycm-init（部分版本）
+			// - /opt/ycm/ycm-init（常见版本）
+			// - /opt/yashan-migrate-platform/ycm-init（旧版本）
 			var ycmInit string
 			possiblePaths := []string{
+				fmt.Sprintf("%s/ycm/ycm-init", installDir),
 				fmt.Sprintf("%s/ycm-init", installDir),
 				fmt.Sprintf("%s/yashan-migrate-platform/ycm-init", installDir),
 			}
@@ -48,7 +52,7 @@ func StepG007Deploy() *runner.Step {
 			ctx.Params["ycm_init_path"] = ycmInit
 
 			// 检查 deploy.yml
-			result, _ = ctx.Execute(fmt.Sprintf("test -f %s", deployFile), false)
+			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", deployFile), false)
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("deploy config not found: %s", deployFile)
 			}
@@ -70,7 +74,6 @@ func StepG007Deploy() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			installDir := ctx.GetParamString("ycm_install_dir", "/opt")
 			deployFile := ctx.GetParamString("ycm_deploy_file", "/opt/ycm/etc/deploy.yml")
 			driver := ctx.GetParamString("ycm_db_driver", "sqlite3")
 			ycmInit := ctx.GetParamString("ycm_init_path", "")

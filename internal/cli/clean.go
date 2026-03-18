@@ -104,15 +104,21 @@ Examples:
 					Host:       target,
 					Port:       globalFlags.SSHPort,
 					User:       globalFlags.SSHUser,
-					AuthMethod: "password",
+					AuthMethod: globalFlags.SSHAuth,
 					Password:   globalFlags.SSHPassword,
+					KeyPath:    globalFlags.SSHKeyPath,
 					Timeout:    30 * time.Second,
 				}
 
 				// 如果用户没有提供密码，使用fallback逻辑
 				var exec ssh.Executor
 				var err error
-				if globalFlags.SSHPassword == "" {
+
+				// Local cleanup (no SSH) for localhost targets
+				if isLocalHost(target) {
+					cfg.AuthMethod = "local"
+					exec, err = ssh.NewExecutor(cfg)
+				} else if globalFlags.SSHPassword == "" {
 					exec, err = ssh.NewExecutorWithFallback(cfg, globalFlags.SSHKeyPath)
 				} else {
 					exec, err = ssh.NewExecutor(cfg)

@@ -266,6 +266,70 @@ func FindLatestYCMPackage(
 	return filepath.Base(latest), nil
 }
 
+// FindLatestYMPPackage 自动查找最新版本的 YMP 软件包
+// 软件包格式: yashan-migrate-platform-23.5.3.2-linux-x86_64.zip 或 yashan-migrate-platform-23.5.3.2-linux-aarch64.zip
+// 返回找到的软件包路径（远程或本地）
+func FindLatestYMPPackage(
+	executor runner.Executor,
+	localDirs []string,
+	remoteDir string,
+) (string, error) {
+	// 获取远程架构
+	arch := "x86_64" // 默认
+	result, _ := executor.Execute("uname -m", false)
+	if result != nil && strings.TrimSpace(result.GetStdout()) != "" {
+		remoteArch := strings.TrimSpace(result.GetStdout())
+		if remoteArch == "aarch64" || remoteArch == "arm64" {
+			arch = "aarch64"
+		}
+	}
+
+	pattern := fmt.Sprintf(`yashan-migrate-platform-(\d+\.\d+\.\d+\.\d+)-linux-%s\.zip`, arch)
+	re := regexp.MustCompile(pattern)
+
+	// 1. 先在远程目录查找
+	var remotePackages []string
+	if remoteDir != "" {
+		result, _ := executor.Execute(fmt.Sprintf("ls -1 %s/yashan-migrate-platform-*-linux-%s.zip 2>/dev/null || true", remoteDir, arch), false)
+		if result != nil && result.GetStdout() != "" {
+			files := strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
+			for _, f := range files {
+				f = strings.TrimSpace(f)
+				if f != "" && re.MatchString(filepath.Base(f)) {
+					remotePackages = append(remotePackages, f)
+				}
+			}
+		}
+	}
+
+	// 如果远程找到了，返回最新版本
+	if len(remotePackages) > 0 {
+		latest := findLatestVersion(remotePackages, re)
+		return latest, nil
+	}
+
+	// 2. 在本地目录查找
+	var localPackages []string
+	for _, dir := range localDirs {
+		matches, err := filepath.Glob(filepath.Join(dir, fmt.Sprintf("yashan-migrate-platform-*-linux-%s.zip", arch)))
+		if err == nil {
+			for _, m := range matches {
+				if re.MatchString(filepath.Base(m)) {
+					localPackages = append(localPackages, m)
+				}
+			}
+		}
+	}
+
+	if len(localPackages) == 0 {
+		return "", fmt.Errorf("no yashan-migrate-platform package found for architecture %s in remote dir '%s' or local dirs %v", arch, remoteDir, localDirs)
+	}
+
+	// 返回最新版本的本地路径（文件名，后续会通过 FindAndDistribute 上传）
+	latest := findLatestVersion(localPackages, re)
+	return filepath.Base(latest), nil
+}
+
 // findLatestVersion 从文件列表中找到版本号最大的文件
 func findLatestVersion(files []string, re *regexp.Regexp) string {
 	if len(files) == 0 {

@@ -76,7 +76,8 @@ func StepCleanDB() *runner.Step {
 		Name:        "Clean YashanDB",
 		Description: "Clean YashanDB installation by stopping processes and removing directories",
 		Tags:        []string{"clean", "db"},
-		Optional:    false,
+		// Optional: when nothing exists, treat as skip (no-op).
+		Optional:    true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
 			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
@@ -151,8 +152,12 @@ func StepCleanDB() *runner.Step {
 			if !strings.HasSuffix(yasdbDataPattern, "/") {
 				yasdbDataPattern = yasdbDataPattern + "/"
 			}
-			findProcessCmd := fmt.Sprintf("ps -ef | grep -E '(%s|%s|%s)' | grep -v grep | awk '{print $2}'",
-				yasdbHomePattern, yasdbDataPattern, clusterName)
+			// Only target YashanDB-related processes, and avoid matching this cleanup command itself.
+			// Note: clusterName / paths may appear in this tool's own command line flags.
+			findProcessCmd := fmt.Sprintf(
+				"ps -ef | grep -E '(yasdb|yasagent|yasom|monit)' | grep -E '(%s|%s|%s)' | grep -v grep | grep -v yinstall | awk '{print $2}'",
+				yasdbHomePattern, yasdbDataPattern, clusterName,
+			)
 			result, _ := ctx.Execute(findProcessCmd, false)
 
 			var pids []string
@@ -236,7 +241,8 @@ func StepCleanDB() *runner.Step {
 
 			// 6. 清理 .bashrc 中该集群的环境变量条目
 			ctx.Logger.Info("Step 6: Cleaning up .bashrc environment entries for cluster '%s'", clusterName)
-			if cleanErr := commonos.CleanEnvVars(ctx.Executor, osUser, clusterName, yasdbData); cleanErr != nil {
+			beginPort := ctx.GetParamInt("db_begin_port", 1688)
+			if cleanErr := commonos.CleanEnvVars(ctx.Executor, osUser, clusterName, yasdbData, beginPort); cleanErr != nil {
 				ctx.Logger.Warn("Failed to clean .bashrc entries: %v", cleanErr)
 			} else {
 				ctx.Logger.Info(".bashrc entries for cluster '%s' cleaned successfully", clusterName)
@@ -292,8 +298,11 @@ func StepCleanDB() *runner.Step {
 			if !strings.HasSuffix(yasdbDataPattern, "/") {
 				yasdbDataPattern = yasdbDataPattern + "/"
 			}
-			findProcessCmd := fmt.Sprintf("ps -ef | grep -E '(%s|%s|%s)' | grep -v grep",
-				yasdbHomePattern, yasdbDataPattern, clusterName)
+			// Only consider YashanDB-related processes and avoid matching this cleanup tool itself.
+			findProcessCmd := fmt.Sprintf(
+				"ps -ef | grep -E '(yasdb|yasagent|yasom|monit)' | grep -E '(%s|%s|%s)' | grep -v grep | grep -v yinstall",
+				yasdbHomePattern, yasdbDataPattern, clusterName,
+			)
 			result, _ := ctx.Execute(findProcessCmd, false)
 
 			if result != nil && result.GetStdout() != "" {

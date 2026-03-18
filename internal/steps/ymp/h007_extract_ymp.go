@@ -23,7 +23,18 @@ func StepH007ExtractYMP() *runner.Step {
 		PreCheck: func(ctx *runner.StepContext) error {
 			ympPackage := ctx.GetParamString("ymp_package", "")
 			if ympPackage == "" {
-				return fmt.Errorf("--ymp-package is required: specify the YMP zip file")
+				// 尝试自动查找最新版本的 YMP 软件包
+				ctx.Logger.Info("ymp_package not specified, searching for latest yashan-migrate-platform package...")
+				remoteDir := ctx.RemoteSoftwareDir
+				if remoteDir == "" {
+					remoteDir = "/data/yashan/soft"
+				}
+				latestPkg, err := commonfile.FindLatestYMPPackage(ctx.Executor, ctx.LocalSoftwareDirs, remoteDir)
+				if err != nil {
+					return fmt.Errorf("ymp_package not specified and auto-search failed: %w", err)
+				}
+				ctx.Logger.Info("Found latest YMP package: %s", latestPkg)
+				ctx.Params["ymp_package"] = latestPkg
 			}
 			return nil
 		},

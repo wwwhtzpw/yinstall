@@ -110,7 +110,7 @@ func init() {
 	dbCmd.Flags().StringVar(&dbCharacterSet, "db-character-set", "utf8", "Character set (utf8/gbk)")
 	dbCmd.Flags().BoolVar(&dbUseNativeType, "db-use-native-type", true, "Use native type")
 	dbCmd.Flags().StringVar(&dbSysPassword, "db-sys-password", "Yashan1!", "Database SYS password")
-	dbCmd.Flags().StringVar(&dbInstallPath, "db-install-path", "/data/yashan/yasdb_home", "Software installation path")
+	dbCmd.Flags().StringVar(&dbInstallPath, "db-home-path", "/data/yashan/yasdb_home", "Software installation path")
 	dbCmd.Flags().StringVar(&dbDataPath, "db-data-path", "/data/yashan/yasdb_data", "Data directory path")
 	dbCmd.Flags().StringVar(&dbLogPath, "db-log-path", "/data/yashan/log", "Log directory path")
 	dbCmd.Flags().StringVar(&dbStageDir, "db-stage-dir", "/home/yashan/install", "Stage directory for extraction")
@@ -161,12 +161,29 @@ func runDB(cmd *cobra.Command, args []string) error {
 		dbOSUserPassword = defaultOSUserPassword
 	}
 
-	if len(flags.Targets) == 0 && !flags.Local {
-		return fmt.Errorf("please specify --targets or use --local for local execution")
+	// If --targets is not specified, default to local execution.
+	if len(flags.Targets) == 0 {
+		flags.Local = true
+		flags.Targets = []string{"localhost"}
+	} else {
+		flags.Local = false
 	}
 
-	if flags.Local {
-		flags.Targets = []string{"localhost"}
+	// When port is not 1688, if user did not explicitly set home/data/log/cluster-name,
+	// use port-suffixed defaults to avoid conflicting with default instance (yasdb_home_<port>, etc.).
+	if dbBeginPort != 1688 {
+		if !cmd.Flags().Changed("db-home-path") {
+			dbInstallPath = fmt.Sprintf("/data/yashan/yasdb_home_%d", dbBeginPort)
+		}
+		if !cmd.Flags().Changed("db-data-path") {
+			dbDataPath = fmt.Sprintf("/data/yashan/yasdb_data_%d", dbBeginPort)
+		}
+		if !cmd.Flags().Changed("db-log-path") {
+			dbLogPath = fmt.Sprintf("/data/yashan/log_%d", dbBeginPort)
+		}
+		if !cmd.Flags().Changed("db-cluster-name") {
+			dbClusterName = fmt.Sprintf("yashandb_%d", dbBeginPort)
+		}
 	}
 
 	// Determine YAC mode
@@ -176,7 +193,9 @@ func runDB(cmd *cobra.Command, args []string) error {
 	if dbSysPassword == "" && !flags.DryRun && !flags.Precheck {
 		return fmt.Errorf("--db-sys-password is required for database creation")
 	}
-	if dbOSUserPassword == "" && !flags.DryRun && !flags.Precheck {
+	// In remote mode, yasboot gen-config needs to SSH into targets as product user.
+	// In local mode (no --targets specified), we don't require os-user-password.
+	if !flags.Local && dbOSUserPassword == "" && !flags.DryRun && !flags.Precheck {
 		return fmt.Errorf("--os-user-password is required for yasboot gen-config (SSH password of product user)")
 	}
 

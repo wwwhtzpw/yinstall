@@ -80,7 +80,7 @@ func init() {
 	ympCmd.Flags().StringVar(&ympUserPassword, "ymp-user-password", "aaBB11@@33$$", "YMP user password")
 
 	// 安装参数
-	ympCmd.Flags().StringVar(&ympPackage, "ymp-package", "", "YMP zip file path (required)")
+	ympCmd.Flags().StringVar(&ympPackage, "ymp-package", "", "YMP zip file path (optional, auto-searched if not specified)")
 	ympCmd.Flags().StringVar(&ympInstallDir, "ymp-install-dir", "/opt/ymp", "YMP installation directory")
 	ympCmd.Flags().IntVar(&ympPort, "ymp-port", 8090, "YMP Web service port (other ports will be calculated automatically: db=port+1, yasom=port+3, yasagent=port+4)")
 
@@ -111,13 +111,12 @@ func init() {
 func runYMP(cmd *cobra.Command, args []string) error {
 	flags := GetGlobalFlags()
 
-	// 参数校验
-	if len(flags.Targets) == 0 && !flags.Local {
-		return fmt.Errorf("please specify --targets or use --local for local execution")
-	}
-
-	if flags.Local {
+	// If --targets is not specified, default to local execution.
+	if len(flags.Targets) == 0 {
+		flags.Local = true
 		flags.Targets = []string{"localhost"}
+	} else {
+		flags.Local = false
 	}
 
 	// 校验数据库模式
@@ -125,10 +124,8 @@ func runYMP(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid --ymp-db-mode: '%s' (case-sensitive). Valid values are: 'yashandb' (default) or 'mysql'", ympDBMode)
 	}
 
+	// ymp_package 可以为空，会在 H-007 PreCheck 阶段自动查找最新版本
 	if !flags.DryRun && !flags.Precheck {
-		if ympPackage == "" {
-			return fmt.Errorf("--ymp-package is required")
-		}
 		if ympInstantclientBasic == "" {
 			return fmt.Errorf("--ymp-instantclient-basic is required")
 		}

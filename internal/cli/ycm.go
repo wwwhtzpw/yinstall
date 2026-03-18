@@ -82,9 +82,9 @@ func init() {
 	ycmCmd.Flags().StringVar(&ycmOSGroup, "os-group", "yashan", "Primary group name")
 
 	// YCM 安装参数
-	ycmCmd.Flags().StringVar(&ycmPackage, "ycm-package", "", "YCM installation package path (required)")
+	ycmCmd.Flags().StringVar(&ycmPackage, "ycm-package", "", "YCM installation package path (optional, auto-searched if not specified)")
 	ycmCmd.Flags().StringVar(&ycmInstallDir, "ycm-install-dir", "/opt", "YCM installation directory")
-	ycmCmd.Flags().StringVar(&ycmDeployFile, "ycm-deploy-file", "/opt/ycm/etc/deploy.yml", "YCM deploy config file path")
+	ycmCmd.Flags().StringVar(&ycmDeployFile, "ycm-deploy-file", "", "YCM deploy config file path (default: <ycm-install-dir>/ycm/etc/deploy.yml)")
 
 	// YCM 端口参数
 	ycmCmd.Flags().IntVar(&ycmPort, "ycm-port", 9060, "YCM Web service port")
@@ -108,13 +108,18 @@ func init() {
 func runYCM(cmd *cobra.Command, args []string) error {
 	flags := GetGlobalFlags()
 
-	// 参数校验
-	if len(flags.Targets) == 0 && !flags.Local {
-		return fmt.Errorf("please specify --targets or use --local for local execution")
+	// If --targets is not specified, default to local execution.
+	if len(flags.Targets) == 0 {
+		flags.Local = true
+		flags.Targets = []string{"localhost"}
+	} else {
+		flags.Local = false
 	}
 
-	if flags.Local {
-		flags.Targets = []string{"localhost"}
+	// In local mode, do not inject default os-user-password unless explicitly set by user.
+	// This avoids unnecessary "login credential" parameters in local execution.
+	if flags.Local && !cmd.Flags().Changed("os-user-password") {
+		ycmOSUserPassword = ""
 	}
 
 	// ycm_package 可以为空，会在 PreCheck 阶段自动寻找最新版本
@@ -302,8 +307,8 @@ func runYCM(cmd *cobra.Command, args []string) error {
 				// 如果步骤失败（不是跳过），即使是 Optional 的也要退出
 				if !result.Success && !result.Skipped {
 					logger.Error("Step %s failed: %v", step.ID, result.Error)
-						lastErr = result.Error
-						break
+					lastErr = result.Error
+					break
 				}
 			}
 
@@ -339,8 +344,8 @@ func runYCM(cmd *cobra.Command, args []string) error {
 				// 如果步骤失败（不是跳过），即使是 Optional 的也要退出
 				if !result.Success && !result.Skipped {
 					logger.Error("Step %s failed: %v", step.ID, result.Error)
-						lastErr = result.Error
-						break
+					lastErr = result.Error
+					break
 				}
 			}
 
@@ -387,7 +392,12 @@ func buildYCMParams(flags GlobalFlags) map[string]interface{} {
 	// YCM 安装参数
 	params["ycm_package"] = ycmPackage
 	params["ycm_install_dir"] = ycmInstallDir
-	params["ycm_deploy_file"] = ycmDeployFile
+	// ycm_deploy_file: 若用户未指定，动态根据 ycm_install_dir 计算
+	deployFile := ycmDeployFile
+	if deployFile == "" {
+		deployFile = ycmInstallDir + "/ycm/etc/deploy.yml"
+	}
+	params["ycm_deploy_file"] = deployFile
 
 	// YCM 端口参数
 	params["ycm_port"] = ycmPort

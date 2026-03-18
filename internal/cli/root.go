@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/spf13/cobra"
 )
@@ -27,7 +29,6 @@ var (
 	sshAuth     string
 	sshPassword string
 	sshKeyPath  string
-	local       bool
 	useSudo     bool
 
 	// 软件目录参数
@@ -85,11 +86,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&sshAuth, "ssh-auth", "password", "SSH auth method (password|key)")
 	rootCmd.PersistentFlags().StringVar(&sshPassword, "ssh-password", "", "SSH password")
 	rootCmd.PersistentFlags().StringVar(&sshKeyPath, "ssh-key-path", defaultSSHKeyPath(), "SSH private key path")
-	rootCmd.PersistentFlags().BoolVar(&local, "local", false, "Force local execution (no SSH)")
 	rootCmd.PersistentFlags().BoolVar(&useSudo, "sudo", true, "Use sudo for privileged operations")
 
 	// 软件目录参数
-	rootCmd.PersistentFlags().StringSliceVar(&localSoftwareDirs, "local-software-dirs", []string{"./software", "./pkg"}, "Local software directories (control plane)")
+	rootCmd.PersistentFlags().StringSliceVar(&localSoftwareDirs, "local-software-dirs", defaultLocalSoftwareDirs(), "Local software directories (control plane)")
 	rootCmd.PersistentFlags().StringVar(&remoteSoftwareDir, "remote-software-dir", "/data/yashan/soft", "Remote software directory (target host)")
 
 	// 添加子命令
@@ -103,12 +103,36 @@ func init() {
 
 func defaultLogDir() string {
 	home, _ := os.UserHomeDir()
-	return home + "/.yinstall/logs"
+	return filepath.Join(home, ".yinstall", "logs")
 }
 
 func defaultSSHKeyPath() string {
 	home, _ := os.UserHomeDir()
-	return home + "/.ssh/id_rsa"
+	return filepath.Join(home, ".ssh", "id_rsa")
+}
+
+// defaultLocalSoftwareDirs 返回默认本地软件目录列表。
+// 除固定的 ./software 和 ./pkg 外，还会加入当前用户家目录下的
+// Downloads/yashan 目录（跨平台：Windows 为 Downloads\yashan）。
+func defaultLocalSoftwareDirs() []string {
+	dirs := []string{"./software", "./pkg"}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return dirs
+	}
+	var downloadsYashan string
+	if runtime.GOOS == "windows" {
+		// Windows: C:\Users\<user>\Downloads\yashan
+		downloadsYashan = filepath.Join(home, "Downloads", "yashan")
+	} else {
+		// macOS / Linux: ~/Downloads/yashan
+		downloadsYashan = filepath.Join(home, "Downloads", "yashan")
+	}
+	// 仅当目录存在时才加入，避免无效路径干扰查找
+	if info, err := os.Stat(downloadsYashan); err == nil && info.IsDir() {
+		dirs = append(dirs, downloadsYashan)
+	}
+	return dirs
 }
 
 // GetGlobalFlags 获取全局参数
@@ -129,6 +153,8 @@ type GlobalFlags struct {
 	SSHAuth           string
 	SSHPassword       string
 	SSHKeyPath        string
+	// Local indicates whether to use local executor (no SSH).
+	// It is not exposed as a CLI flag anymore; commands derive it from whether --targets is specified.
 	Local             bool
 	UseSudo           bool
 	LocalSoftwareDirs []string
@@ -153,7 +179,7 @@ func GetGlobalFlags() GlobalFlags {
 		SSHAuth:           sshAuth,
 		SSHPassword:       sshPassword,
 		SSHKeyPath:        sshKeyPath,
-		Local:             local,
+		Local:             false,
 		UseSudo:           useSudo,
 		LocalSoftwareDirs: localSoftwareDirs,
 		RemoteSoftwareDir: remoteSoftwareDir,

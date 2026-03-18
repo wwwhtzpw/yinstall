@@ -250,7 +250,7 @@
 
 - **软件缓存目录（默认）**：`/data/yashan/soft`（对应 `--remote-software-dir`）\n+  - 建议子目录（可选）：`db/`、`ycm/`、`ymp/`、`deps/`、`iso/`
 - **执行临时目录（固定规则）**：`/var/tmp/yinstall/<run_id>/`\n+  - 用途：临时配置副本、探测结果、校验输出等\n+  - 清理策略：由工具内置策略处理（不对外暴露参数）
-- **YashanDB 默认目录**（可参数化）：\n+  - `--db-install-path`：`/data/yashan/yasdb_home`\n+  - `--db-data-path`：`/data/yashan/yasdb_data`\n+  - `--db-log-path`：`/data/yashan/log`\n+  - `--db-stage-dir`：`/home/yashan/install`
+- **YashanDB 默认目录**（可参数化）：\n+  - `--db-home-path`：`/data/yashan/yasdb_home`\n+  - `--db-data-path`：`/data/yashan/yasdb_data`\n+  - `--db-log-path`：`/data/yashan/log`\n+  - `--db-stage-dir`：`/home/yashan/install`
 - **YCM 默认目录**（可参数化）：\n+  - `--ycm-install-dir`：默认 `/opt`（即 `/opt/ycm`）\n+  - `--ycm-deploy-file`：`/opt/ycm/etc/deploy.yml`
 - **YMP 默认目录**（可参数化）：\n+  - `--ymp-install-dir`：`/opt/ymp`\n+  - `--ymp-oracle-env-file`：`/home/ymp/.oracle`
 
@@ -375,7 +375,7 @@
   - **`--db-use-native-type`**：原生类型；默认：true
   - **`--db-admin-password`**：管理员口令；默认：未提供（建库时必填）
 - **路径（默认按最佳实践）**
-  - **`--db-install-path`**：软件安装目录；默认：`/data/yashan/yasdb_home`
+  - **`--db-home-path`**：软件安装目录；默认：`/data/yashan/yasdb_home`
   - **`--db-data-path`**：数据目录；默认：`/data/yashan/yasdb_data`
   - **`--db-log-path`**：日志目录；默认：`/data/yashan/log`
   - **`--db-stage-dir`**：解压/执行目录；默认：`/home/yashan/install`
@@ -434,7 +434,7 @@
   - **`--os-user-password`**：备库节点用户密码；默认：空（用于 `yasboot config node gen` 命令）
   - **`--os-group`**：备库节点主组名；默认：`yashan`
 - **路径（必须与主库保持一致）**
-  - **`--db-install-path`**：软件安装目录；默认：`/data/yashan/yasdb_home`
+  - **`--db-home-path`**：软件安装目录；默认：`/data/yashan/yasdb_home`
   - **`--db-data-path`**：数据目录；默认：`/data/yashan/yasdb_data`
   - **`--db-log-path`**：日志目录；默认：`/data/yashan/log`
   - **`--db-stage-dir`**：主库解压/执行目录（扩容命令在此执行）；默认：`/home/yashan/install`

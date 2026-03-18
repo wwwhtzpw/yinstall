@@ -93,7 +93,7 @@ func init() {
 	// 数据库参数
 	standbyCmd.Flags().StringVar(&standbyClusterName, "db-cluster-name", "yashandb", "Database cluster name (must match primary)")
 	standbyCmd.Flags().StringVar(&standbyAdminPassword, "db-admin-password", "", "Database SYS admin password (optional, not used in standby creation)")
-	standbyCmd.Flags().StringVar(&standbyInstallPath, "db-install-path", "/data/yashan/yasdb_home", "Software installation path")
+	standbyCmd.Flags().StringVar(&standbyInstallPath, "db-home-path", "/data/yashan/yasdb_home", "Software installation path")
 	standbyCmd.Flags().StringVar(&standbyDataPath, "db-data-path", "/data/yashan/yasdb_data", "Data directory path")
 	standbyCmd.Flags().StringVar(&standbyLogPath, "db-log-path", "/data/yashan/log", "Log directory path")
 	standbyCmd.Flags().StringVar(&standbyStageDir, "db-stage-dir", "/home/yashan/install", "Primary stage directory (where yasboot runs)")
@@ -115,6 +115,25 @@ func runStandby(cmd *cobra.Command, args []string) error {
 	// 参数校验
 	if err := validateStandbyParams(flags); err != nil {
 		return err
+	}
+
+	// Derive local execution for standby when both primary and all standby targets are local.
+	// (Standby still requires --targets, but we can avoid SSH when operating on localhost.)
+	if isLocalHost(primaryIP) {
+		allLocal := true
+		for _, t := range flags.Targets {
+			if !isLocalHost(t) {
+				allLocal = false
+				break
+			}
+		}
+		if allLocal {
+			flags.Local = true
+			// In local mode, do not inject default standby os-user-password unless explicitly set by user.
+			if !cmd.Flags().Changed("os-user-password") {
+				standbyOSUserPassword = ""
+			}
+		}
 	}
 
 	// 设置主库 SSH 参数默认值（继承全局参数）
@@ -263,7 +282,7 @@ func validateStandbyParams(flags GlobalFlags) error {
 		return fmt.Errorf("--primary-ip is required")
 	}
 
-	if len(flags.Targets) == 0 && !flags.Local {
+	if len(flags.Targets) == 0 {
 		return fmt.Errorf("--targets is required (standby node IP addresses)")
 	}
 
@@ -336,12 +355,22 @@ func createPrimaryExecutor(flags GlobalFlags, logger *logging.Logger, stepID str
 		StepID:     stepID,
 	}
 
+	if flags.Local {
+		cfg.AuthMethod = "local"
+		return ssh.NewExecutor(cfg)
+	}
+
 	// 如果用户没有提供密码，使用fallback逻辑
 	if primarySSHPassword == "" && flags.SSHAuth == "password" {
 		return ssh.NewExecutorWithFallback(cfg, "")
 	}
 
 	return ssh.NewExecutor(cfg)
+}
+
+func isLocalHost(host string) bool {
+	h := strings.TrimSpace(strings.ToLower(host))
+	return h == "localhost" || h == "127.0.0.1" || h == "::1"
 }
 
 // categorizeStandbySteps 分类步骤：OS 步骤和扩容步骤

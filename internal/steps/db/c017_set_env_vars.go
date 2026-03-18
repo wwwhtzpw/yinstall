@@ -57,10 +57,10 @@ func StepC017SetEnvVars() *runner.Step {
 
 				hctx.Logger.Info("Home directory: %s", result.HomeDir)
 				hctx.Logger.Info("Running yasdb processes: %d", result.YasdbCount)
-				if result.YasdbCount <= 1 {
-					hctx.Logger.Info("Single instance mode: writing to .bashrc")
+				if cfg.BeginPort == 1688 {
+					hctx.Logger.Info("Default port (1688): writing to .bashrc")
 				} else {
-					hctx.Logger.Info("Multiple instances mode: writing to .%d", beginPort)
+					hctx.Logger.Info("Non-default port (%d): writing to .port%d", beginPort, beginPort)
 				}
 				hctx.Logger.Info("Found generated bashrc: %s", result.BashrcPath)
 				hctx.Logger.Info("Environment variables configured to: %s", result.TargetEnvFile)

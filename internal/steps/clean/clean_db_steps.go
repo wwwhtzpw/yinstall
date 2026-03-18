@@ -364,6 +364,17 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 			}
 
 			ctx.Logger.Info("Configuration cleanup completed")
+
+			// 清理 ~/.bashrc 或 ~/.port<port> 中该集群的环境变量条目
+			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
+			beginPort := ctx.GetParamInt("db_begin_port", 1688)
+			ctx.Logger.Info("Cleaning up env var entries for cluster '%s' (port %d)...", clusterName, beginPort)
+			if cleanErr := commonos.CleanEnvVars(ctx.Executor, osUser, clusterName, yasdbData, beginPort); cleanErr != nil {
+				ctx.Logger.Warn("Failed to clean env var entries: %v", cleanErr)
+			} else {
+				ctx.Logger.Info("Env var entries for cluster '%s' cleaned successfully", clusterName)
+			}
+
 			return nil
 		},
 
